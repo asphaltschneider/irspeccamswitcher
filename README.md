@@ -9,18 +9,3 @@ Feel free to get in touch with me for ideas and suggestions!
 
 ## Configuration
 Fill in the ident of the driver inside the config file
-
-Choose your desired cams for events that happen on track like
-overtakes, battles etc.
-
-## Requirements
-For making this work, you need to run the server.exe from Kutu's
-iRacing Browser Apps or Kapps.
-
-- iRacing Browser Apps: https://ir-apps.kutu.ru/
-- Kapps: https://kapps.kutu.ru/
-
-
-
-
-
