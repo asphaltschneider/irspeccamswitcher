@@ -28,6 +28,7 @@ VERSION = "0.01"
 configfile = "irspeccamswitcher.cfg"
 CONFIG = configparser.ConfigParser()
 CONFIG.read(configfile)
+CAMERAS = {}
 
 # this is our State class, with some helpful variables
 class State:
@@ -88,15 +89,19 @@ def loop(carNum, last_epoch):
         if epoch_time - last_epoch > 3:
             if switch_cam == 1 and driversindistance == 1:
                 #print("1 Switch Cam to", carNum)
-                ir.cam_switch_num(carNum, 19, 0)
+                #ir.cam_switch_num(carNum, 19, 0)
+                ir.cam_switch_num(carNum, CAMERA_DICT["Far Chase"], 0)
             elif switch_cam == 2 and driversindistance == 1:
                 #print("2 Switch Cam to", carNum)
-                ir.cam_switch_num(carNum, 2, 0)
+                #ir.cam_switch_num(carNum, 2, 0)
+                ir.cam_switch_num(carNum, CAMERA_DICT["Gearbox"], 0)
             elif switch_cam > 0 and driversindistance > 1:
-                ir.cam_switch_num(carNum, 16, 0)
+                #ir.cam_switch_num(carNum, 16, 0)
+                ir.cam_switch_num(carNum, CAMERA_DICT["Chopper"], 0)
             else:
                 #print("e Switch Cam to", carNum)
-                ir.cam_switch_num(carNum, 10, 0)
+                #ir.cam_switch_num(carNum, 10, 0)
+                ir.cam_switch_num(carNum, CAMERA_DICT["TV1"], 0)
             return epoch_time
 
     return last_epoch
@@ -127,6 +132,8 @@ def cameras():
         cameras = ir["CameraInfo"]["Groups"]
         for i in cameras:
             print(curtimestamp, "Name:", i["GroupName"], "GroupNum", i["GroupNum"])
+            CAMERA_DICT[i["GroupName"]]=i["GroupNum"]
+
 
 if __name__ == '__main__':
     print("Starting up irspeccamswitcher...")
@@ -157,7 +164,8 @@ if __name__ == '__main__':
                 curtimestamp = now.strftime("%y-%m-%d %H:%M:%S")
 
                 if read_cameras == 0:
-                    #cameras()
+                    CAMERA_DICT={}
+                    cameras()
                     read_cameras = 1
 
                 # print some session infos
