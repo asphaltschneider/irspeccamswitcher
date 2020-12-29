@@ -2,6 +2,7 @@ import irsdk
 import time
 from datetime import datetime
 import configparser
+import re
 
 # 20-12-27 23:42:04 Name: Nose GroupNum 1
 # 20-12-27 23:42:04 Name: Gearbox GroupNum 2
@@ -24,7 +25,7 @@ import configparser
 # 20-12-27 23:42:04 Name: Far Chase GroupNum 19
 # 20-12-27 23:42:04 Name: Rear Chase GroupNum 20
 
-VERSION = "0.01"
+VERSION = "0.02"
 configfile = "irspeccamswitcher.cfg"
 CONFIG = configparser.ConfigParser()
 CONFIG.read(configfile)
@@ -62,29 +63,59 @@ def check_iracing():
             print(curtimestamp, "Start type is", standingstart, "start")
 
 
-def loop(carNum, last_epoch):
+def loop(carNum, last_epoch, prev_epoch, prev_pctspecon):
+    # calculate speed from prev vs current position
 
     ir.freeze_var_buffer_latest()
     switch_cam = 0
     epoch_time = int(time.time())
     if ir["DriverInfo"]:
         spec_on = ir["CamCarIdx"]
-        pctspecon = ir["CarIdxLapDistPct"][spec_on] * 100
+        pctspecon = ir["CarIdxLapDistPct"][spec_on]
+        #print("tracklength", ir["WeekendInfo"]["TrackLength"])
+        tracklength = ir["WeekendInfo"]["TrackLength"]
+        try:
+            tracklength_km = re.search('([\d\.]+?)\ km.*$', tracklength).group(1)
+        except AttributeError:
+            tracklength_km = ''
+        tracklength_m = float(tracklength_km) * 1000
+        #print("tracklength", tracklength_m)
+        cur_pctspecon = pctspecon
+        if prev_pctspecon > 0.8 and cur_pctspecon < 0.2:
+            cur_pctspecon += 1
+            #print("over the line")
+        cur_m_specon = tracklength_m * cur_pctspecon
+        prev_m_specon = tracklength_m * prev_pctspecon
+        diff_m_specon = cur_m_specon - prev_m_specon
+        diff_epoch = epoch_time - prev_epoch
+        calc_speed = diff_m_specon / diff_epoch
+        calc_speed_kmh = int((calc_speed * 3600) / 1000)
+        #print("travelled", diff_m_specon, "meters in", diff_epoch, "seconds - speed", calc_speed_kmh, "km/h")
+
+        # Method 1: Easy but not very precise way to calculate gaps
+        # * Calculate distance fraction between 2 cars by substracting their CarIdxLapDistPct
+        # * Multiply by track length to get distance in m
+        # * Divide by speed to get time gap
 
         driversindistance = 0
         for i in range(len(ir["CarIdxLapDistPct"])):
             if i != spec_on:
                 if ir["CarIdxLapDistPct"][i] != -1:
-                    pctdriver=(ir["CarIdxLapDistPct"][i] * 100) - pctspecon
+                    try:
+                        pctdriver=(ir["CarIdxLapDistPct"][i] - pctspecon) * tracklength_m / calc_speed
+                    except ZeroDivisionError:
+                        pctdriver = (ir["CarIdxLapDistPct"][i] - pctspecon) * tracklength_m / 0.1
                     #if pctdriver < 0:
                     #    pctdriver += 100
                     #print("   ", i, pctdriver)
-                    if pctdriver < 0.5 and pctdriver > -0.2:
+                    if pctdriver < 0.4 and pctdriver > -0.1:
                         driversindistance += 1
                         switch_cam = 1
-                    elif pctdriver > -0.5 and pctdriver <= -0.2:
+                        #print("opponent is close infront", pctdriver)
+                    elif pctdriver > -0.4 and pctdriver <= -0.1:
                         driversindistance += 1
                         switch_cam = 2
+                        #print("opponent is close behind", pctdriver)
 
         if epoch_time - last_epoch > 3:
             if switch_cam == 1 and driversindistance == 1:
@@ -102,23 +133,29 @@ def loop(carNum, last_epoch):
                 #print("e Switch Cam to", carNum)
                 #ir.cam_switch_num(carNum, 10, 0)
                 ir.cam_switch_num(carNum, CAMERA_DICT["TV1"], 0)
-            return epoch_time
+            return epoch_time, epoch_time, pctspecon
 
-    return last_epoch
+    return last_epoch, epoch_time, pctspecon
 
 
 def findDriver(uid):
+    found_driver = 0
     if ir["DriverInfo"]:
         for i in range(len(ir["DriverInfo"]["Drivers"])):
             if ir["DriverInfo"]["Drivers"][i]["UserID"] == int(uid):
-                print("+++ Number", ir["DriverInfo"]["Drivers"][i]["CarNumber"], "UID",
-                      ir["DriverInfo"]["Drivers"][i]["UserID"], "==", uid, ", Driver", ir["DriverInfo"]["Drivers"][i]["UserName"])
-                ir.cam_switch_num(ir["DriverInfo"]["Drivers"][i]["CarNumber"], 10, 0)
+                ir.cam_switch_num(ir["DriverInfo"]["Drivers"][i]["CarNumber"], CAMERA_DICT["Rear Chase"], 0)
+                found_driver = 1
                 return ir["DriverInfo"]["Drivers"][i]["CarNumber"]
-            #else:
-                #print("    Number", ir["DriverInfo"]["Drivers"][i]["CarNumber"], "UID", ir["DriverInfo"]["Drivers"][i]["UserID"], "!=", uid, ", Driver", ir["DriverInfo"]["Drivers"][i]["UserName"])
 
-    print("Driver was not found!")
+    if found_driver == 0:
+        print("Driver was not found! Please add your desired driver uid to irspeccamswitcher.cfg")
+        print("---------------------------------------------------------------------------------")
+        print("Starting field:")
+        for i in range(len(ir["DriverInfo"]["Drivers"])):
+            print("Number", ir["DriverInfo"]["Drivers"][i]["CarNumber"], "UID",
+                  ir["DriverInfo"]["Drivers"][i]["UserID"], ", Driver",
+                  ir["DriverInfo"]["Drivers"][i]["UserName"])
+        input("Press any key to exit")
     return -1
 
 
@@ -131,7 +168,7 @@ def cameras():
     if ir["CameraInfo"]:
         cameras = ir["CameraInfo"]["Groups"]
         for i in cameras:
-            print(curtimestamp, "Name:", i["GroupName"], "GroupNum", i["GroupNum"])
+            #print(curtimestamp, "Name:", i["GroupName"], "GroupNum", i["GroupNum"])
             CAMERA_DICT[i["GroupName"]]=i["GroupNum"]
 
 
@@ -154,6 +191,8 @@ if __name__ == '__main__':
         read_cameras = 0
         carNum = -1
         camswitch_epoch = 1
+        previous_epoch = 1
+        previous_pctspecon = 0
         while True:
             # check if we are connected to iracing
             check_iracing()
@@ -174,12 +213,15 @@ if __name__ == '__main__':
                     sessionName = ir["SessionInfo"]["Sessions"][sessionNum]["SessionName"]
                     print(curtimestamp, "Current Session is ", sessionName)
                     carNum=findDriver(druid)
+                    if(carNum == -1):
+                        exit(0)
 
-                camswitch_epoch = loop(carNum, camswitch_epoch)
+                camswitch_epoch, previous_epoch, previous_pctspecon = loop(carNum, camswitch_epoch, previous_epoch, previous_pctspecon)
             # sleep for 1 second
             # maximum you can use is 1/60
             # cause iracing updates data with 60 fps
-            time.sleep(10/60)
+            time.sleep(1)
+            #time.sleep(10/60)
     except KeyboardInterrupt:
         # press ctrl+c to exit
         pass
