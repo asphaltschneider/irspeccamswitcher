@@ -34,6 +34,7 @@ CONFIG = configparser.ConfigParser()
 CONFIG.read(configfile)
 CAMERAS = {}
 SESSIONID = -1
+SESSIONNAME = 'None'
 DRIVER_DICT = {}
 DRIVER_LIST = []
 DRIVERTOSPECID = -1
@@ -43,6 +44,14 @@ DRIVERTOSPECNUMBER = -1
 class State:
     ir_connected = False
     last_car_setup_tick = -1
+    global CAMERAS
+    global SESSIONID
+    global SESSIONNAME
+    global DRIVER_DICT
+    global DRIVER_LIST
+    global DRIVERTOSPECID
+    global DRIVERTOSPECNUMBER
+
 
 
 # here we check if we are connected to iracing
@@ -72,16 +81,16 @@ def check_iracing():
             #fillDriverDict()
 
 
-def loop(carNum, last_epoch, prev_epoch, prev_pctspecon):
+def loop(carNum, last_epoch, prev_epoch, prev_pctspecon, DRIVERTOSPECNUMBER, SESSIONNAME, DRIVERTOSPECID):
     # calculate speed from prev vs current position
 
     ir.freeze_var_buffer_latest()
     switch_cam = 0
     switch_cam_number = '0'
-    epoch_time = int(time.time())
+    epoch_time = time.time()
     if ir["DriverInfo"]:
-        spec_on = ir["CamCarIdx"]
-        pctspecon = ir["CarIdxLapDistPct"][spec_on]
+        spec_on = DRIVERTOSPECID
+        pctspecon = ir["CarIdxLapDistPct"][DRIVERTOSPECID]
         #print("tracklength", ir["WeekendInfo"]["TrackLength"])
         tracklength = ir["WeekendInfo"]["TrackLength"]
         try:
@@ -111,7 +120,8 @@ def loop(carNum, last_epoch, prev_epoch, prev_pctspecon):
         DRIVER_LIST = []
         driversindistance = 0
         for i in range(len(ir["CarIdxLapDistPct"])):
-            if i != spec_on:
+            #print("i=%i" % (i))
+            if i != int(DRIVERTOSPECID) and i != 0:
                 if ir["CarIdxLapDistPct"][i] != -1:
                     try:
                         pctdriver=(ir["CarIdxLapDistPct"][i] - pctspecon) * tracklength_m / calc_speed
@@ -123,7 +133,7 @@ def loop(carNum, last_epoch, prev_epoch, prev_pctspecon):
                     #print("Number", ir["DriverInfo"]["Drivers"][i]["CarNumber"], "UID",
                     #      ir["DriverInfo"]["Drivers"][i]["UserID"], ", Driver",
                     #      ir["DriverInfo"]["Drivers"][i]["UserName"])
-                    if pctdriver <= (tracklength_m + 15) and (ir["DriverInfo"]["Drivers"][i]["CarNumber"] != '0'):
+                    if pctdriver <= (tracklength_m + 15):
                         tmpDict = {}
                         tmpDict["ID"] = i
                         tmpDict["DriverName"] = ir["DriverInfo"]["Drivers"][i]["UserName"]
@@ -131,17 +141,18 @@ def loop(carNum, last_epoch, prev_epoch, prev_pctspecon):
                         tmpDict["CarNumber"] = ir["DriverInfo"]["Drivers"][i]["CarNumber"]
                         tmpDict["Distance"] = pctdriver
                         DRIVER_LIST.append(tmpDict)
-                    if pctdriver < 0.4 and pctdriver > -0.1:
-                        driversindistance += 1
-                        switch_cam = 1
-                        switch_cam_number = DRIVERTOSPECNUMBER
-                        #print("opponent is close infront", pctdriver)
+                    if pctdriver < 0.6 and pctdriver > -0.1:
+                        if ir["DriverInfo"]["Drivers"][i]["CarNumber"] != DRIVERTOSPECNUMBER:
+                            driversindistance += 1
+                            switch_cam = 1
+                            switch_cam_number = DRIVERTOSPECNUMBER
+                            #print("opponent", ir["DriverInfo"]["Drivers"][i]["CarNumber"], "is infront     ", pctdriver, "driversindistance:", driversindistance)
                     elif pctdriver > -0.4 and pctdriver <= -0.1:
                         driversindistance += 1
                         switch_cam = 2
                         switch_cam_number = ir["DriverInfo"]["Drivers"][i]["CarNumber"]
-                        #print("opponent is close behind", pctdriver)
-            else:
+                        #rint("opponent", switch_cam_number, "is close behind", pctdriver, "driversindistance:", driversindistance)
+            elif ir["DriverInfo"]["Drivers"][i]["CarNumber"] != DRIVERTOSPECNUMBER:
                 if ir["DriverInfo"]["Drivers"][i]["CarNumber"] != "0":
                     tmpDict = {}
                     tmpDict["ID"] = i
@@ -161,26 +172,30 @@ def loop(carNum, last_epoch, prev_epoch, prev_pctspecon):
         #print("-----------------------------")
         #pp.pprint(relative_dict[])
 
+        if SESSIONNAME != 'QUALIFY':
+            if epoch_time - last_epoch > 5:
+                if switch_cam == 1 and driversindistance == 1:
+                    #print("1,1 Switch Cam to", DRIVERTOSPECNUMBER, "Chase")
+                    #ir.cam_switch_num(carNum, 19, 0)
+                    ir.cam_switch_num(DRIVERTOSPECNUMBER, CAMERA_DICT["Chase"], 0)
+                elif switch_cam == 2 and driversindistance == 1:
+                    #print("2,1 Switch Cam to", switch_cam_number, "Gyro")
+                    #ir.cam_switch_num(carNum, 2, 0)
+                    ir.cam_switch_num(switch_cam_number, CAMERA_DICT["Gyro"], 0)
+                elif switch_cam > 0 and driversindistance > 1:
+                    #print(">0,>1 Switch Cam to", DRIVERTOSPECNUMBER, "Far Chase")
+                    #ir.cam_switch_num(carNum, 16, 0)
+                    ir.cam_switch_num(DRIVERTOSPECNUMBER, CAMERA_DICT["Far Chase"], 0)
+                else:
+                    #print("e Switch Cam to", DRIVERTOSPECNUMBER, "TV1")
+                    #ir.cam_switch_num(carNum, 10, 0)
+                    ir.cam_switch_num(DRIVERTOSPECNUMBER, CAMERA_DICT["TV1"], 0)
+                return epoch_time, epoch_time, pctspecon, DRIVERTOSPECNUMBER, SESSIONNAME
+        else:
+            ir.cam_switch_num(DRIVERTOSPECNUMBER, CAMERA_DICT["Chase"], 0)
+            return epoch_time, epoch_time, pctspecon, DRIVERTOSPECNUMBER, SESSIONNAME
 
-        if epoch_time - last_epoch > 3:
-            if switch_cam == 1 and driversindistance == 1:
-                #print("1 Switch Cam to", carNum)
-                #ir.cam_switch_num(carNum, 19, 0)
-                ir.cam_switch_num(DRIVERTOSPECNUMBER, CAMERA_DICT["Far Chase"], 0)
-            elif switch_cam == 2 and driversindistance == 1:
-                #print("2 Switch Cam to", carNum)
-                #ir.cam_switch_num(carNum, 2, 0)
-                ir.cam_switch_num(switch_cam_number, CAMERA_DICT["Gyro"], 0)
-            elif switch_cam > 0 and driversindistance > 1:
-                #ir.cam_switch_num(carNum, 16, 0)
-                ir.cam_switch_num(DRIVERTOSPECNUMBER, CAMERA_DICT["Chopper"], 0)
-            else:
-                #print("e Switch Cam to", carNum)
-                #ir.cam_switch_num(carNum, 10, 0)
-                ir.cam_switch_num(DRIVERTOSPECNUMBER, CAMERA_DICT["TV1"], 0)
-            return epoch_time, epoch_time, pctspecon
-
-    return last_epoch, epoch_time, pctspecon
+    return last_epoch, epoch_time, pctspecon, DRIVERTOSPECNUMBER, SESSIONNAME
 
 
 def findDriver(uid):
@@ -192,7 +207,10 @@ def findDriver(uid):
                 found_driver = 1
                 DRIVERTOSPECNUMBER = ir["DriverInfo"]["Drivers"][i]["CarNumber"]
                 DRIVERTOSPECID = i
-                return ir["DriverInfo"]["Drivers"][i]["CarNumber"]
+                curtime = datetime.now()
+                curtimestamp = curtime.strftime("%y-%m-%d %H:%M:%S")
+                print(curtimestamp, "spotting Driver #%s - %s" % (DRIVERTOSPECNUMBER, ir["DriverInfo"]["Drivers"][i]["UserName"]))
+                return ir["DriverInfo"]["Drivers"][i]["CarNumber"], DRIVERTOSPECID
 
     if found_driver == 0:
         print("Driver was not found! Please add your desired driver uid to irspeccamswitcher.cfg")
@@ -203,7 +221,7 @@ def findDriver(uid):
                   ir["DriverInfo"]["Drivers"][i]["UserID"], ", Driver",
                   ir["DriverInfo"]["Drivers"][i]["UserName"])
         input("Press any key to exit")
-    return -1
+    return -1, -1
 
 def fillDriverDict():
     if ir["DriverInfo"]:
@@ -233,6 +251,7 @@ def cameras():
 
 
 if __name__ == '__main__':
+
     colorama.init()
     print("Starting up irspeccamswitcher...")
     print("Version: ", VERSION)
@@ -243,7 +262,7 @@ if __name__ == '__main__':
     ir = irsdk.IRSDK()
     state = State()
     sessionNum = -1
-    sessionName = "None"
+    SESSIONNAME = "None"
     try:
         # who's interesting?
         druid=CONFIG["DRIVER"]["driverID"]
@@ -272,20 +291,20 @@ if __name__ == '__main__':
                 if ir["SessionNum"] != sessionNum or SESSIONID != ir["SessionID"]:
                     SESSIONID = ir["SessionID"]
                     sessionNum = ir["SessionNum"]
-                    sessionName = ir["SessionInfo"]["Sessions"][sessionNum]["SessionName"]
-                    print(curtimestamp, "Current Session is ", sessionName)
+                    SESSIONNAME = ir["SessionInfo"]["Sessions"][sessionNum]["SessionName"]
+                    print(curtimestamp, "Current Session is ", SESSIONNAME)
                     #fillDriverDict()
-                    carNum=findDriver(druid)
+                    DRIVERTOSPECNUMBER, DRIVERTOSPECID = findDriver(druid)
                     read_cameras
-                    if(carNum == -1):
+                    if(DRIVERTOSPECNUMBER == -1):
                         exit(0)
 
-                camswitch_epoch, previous_epoch, previous_pctspecon = loop(carNum, camswitch_epoch, previous_epoch, previous_pctspecon)
+                camswitch_epoch, previous_epoch, previous_pctspecon, DRIVERTOSPECNUMBER, SESSIONNAME = loop(carNum, camswitch_epoch, previous_epoch, previous_pctspecon, DRIVERTOSPECNUMBER, SESSIONNAME, DRIVERTOSPECID)
             # sleep for 1 second
             # maximum you can use is 1/60
             # cause iracing updates data with 60 fps
-            time.sleep(1)
-            #time.sleep(10/60)
+            #time.sleep(1)
+            time.sleep(10/60)
     except KeyboardInterrupt:
         # press ctrl+c to exit
         pass
